@@ -1,0 +1,24 @@
+name: irce
+version: "0.1.0"
+description: "OpenEnv benchmark for budget-aware recovery decisions under ambiguous failures, cooldowns, and drift."
+app: server.app:app
+runtime: fastapi
+port: 8000
+tasks:
+  - id: 1
+    name: easy
+    description: "Clean recovery with transient and hard failures."
+  - id: 2
+    name: medium
+    description: "Mixed failures with rate limits, ambiguous outcomes, and budget pressure."
+  - id: 3
+    name: hard
+    description: "Drifting reliability, noisy signals, cooldowns, and costly backup routing."
+max_steps: 7
+metadata:
+  display_name: "Intelligent RecoveryControl Environment"
+  package_name: "irce"
+  package_dir: "src/irce"
+  benchmark_focus: "failure-recovery under uncertainty"
+  deterministic: true
+  llm_ready: true

@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+import os
+
+import uvicorn
+
+
+def main() -> None:
+    app_path = "irce.server.app:app"
+
+    try:
+        __import__("irce.server.app")
+    except ImportError:  # pragma: no cover
+        app_path = "server.app:app"
+
+    uvicorn.run(
+        app_path,
+        host=os.getenv("IRCE_HOST", "0.0.0.0"),
+        port=int(os.getenv("IRCE_PORT", "8000")),
+        reload=os.getenv("IRCE_RELOAD", "false").lower() in {"1", "true", "yes"},
+    )
+
+
+if __name__ == "__main__":
+    main()
