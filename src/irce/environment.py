@@ -328,7 +328,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             done=done,
         )
         history_entry = (
-            f"{action_type}->{observation.tool_result}"
+            f"step={self._state.step_count} {action_type}->{observation.tool_result}"
             f" [{observation.error_type}]"
             f" tool={self._state.tool_state}"
             f" budget={observation.budget_remaining:.2f}"
@@ -337,6 +337,7 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
         self._state.history = self._state.history[-3:]
         observation.history_tail = list(self._state.history)
         observation.status_summary = self._status_summary(observation)
+        observation.decision_context = self._decision_context(observation)
         self._state.last_reward = reward_breakdown.total
         self._state.last_tool_result = tool_result
         self.episode_log.append(
@@ -403,24 +404,80 @@ class IRCEEnv(Environment[IRCEAction, IRCEObservation, IRCEState]):
             done=done,
         )
         observation.status_summary = self._status_summary(observation)
+        observation.decision_context = self._decision_context(observation)
         return self._apply_transform(observation)
 
     def _status_summary(self, observation: IRCEObservation) -> str:
-        recent_history = "none"
-        if observation.history_tail:
-            recent_history = " | ".join(observation.history_tail[-2:])
+        steps_left = self.task_config.max_steps - observation.step_count
+        recent_history = " -> ".join(observation.history_tail[-2:]) if observation.history_tail else "none"
 
         return (
             f"result={observation.tool_result}; "
             f"error={observation.error_type}; "
             f"tool={observation.active_tool}; "
-            f"budget={observation.budget_remaining:.2f}; "
-            f"step={observation.step_count}/{self.task_config.max_steps}; "
+            f"budget={observation.budget_remaining:.2f} ({observation.budget_remaining:.0%}); "
+            f"step={observation.step_count}/{self.task_config.max_steps} ({steps_left} left); "
             f"cooldown={observation.cooldown_remaining}; "
             f"repeat_errors={observation.same_error_count}; "
-            f"progress_hint={observation.progress_hint:.2f}; "
+            f"progress={observation.progress_hint:.0%}; "
             f"recent={recent_history}"
         )
+
+    def _decision_context(self, observation: IRCEObservation) -> str:
+        """Factual signal summary — describes active constraints, not recommended actions."""
+        signals: list[str] = []
+
+        # Cooldown — state the constraint, not the implication for specific actions
+        if observation.cooldown_remaining > 0:
+            signals.append(
+                f"cooldown active ({observation.cooldown_remaining} step(s) remaining) — "
+                "same-path retry attempts blocked until cooldown clears"
+            )
+
+        # Ambiguous outcome — state what happened, not what to do next
+        if observation.tool_result == "AMBIGUOUS":
+            signals.append(
+                "partial progress recorded but outcome unconfirmed — "
+                "ambiguity carried over from previous step"
+            )
+
+        # Error type — describe the failure pattern, not action preference
+        if observation.error_type == "RATE_LIMIT":
+            signals.append("rate-limited — same-path retries continuing to fail")
+        elif observation.error_type == "HARD":
+            if observation.same_error_count >= 2:
+                signals.append(
+                    f"hard failure on {observation.same_error_count} consecutive steps — "
+                    "same-error penalty accumulating"
+                )
+            elif observation.same_error_count == 1:
+                signals.append("hard failure on consecutive steps — structural issue likely")
+            else:
+                signals.append("hard failure — structural issue detected on this step")
+        elif observation.error_type == "TRANSIENT":
+            if observation.same_error_count >= 1:
+                signals.append(
+                    f"transient failure repeated {observation.same_error_count} time(s) — "
+                    "pattern persisting"
+                )
+            else:
+                signals.append("transient failure — single occurrence this episode")
+
+        # Budget and tool cost — state facts, not cost-avoidance advice
+        steps_left = self.task_config.max_steps - observation.step_count
+        if observation.budget_remaining < 0.2:
+            signals.append(
+                f"budget at {observation.budget_remaining:.0%} with {steps_left} step(s) remaining"
+            )
+        elif observation.active_tool == "backup":
+            signals.append("on backup tool — elevated per-step budget cost active")
+
+        if steps_left <= 1 and observation.progress_hint < 0.8:
+            signals.append(
+                f"final step available — progress at {observation.progress_hint:.0%}"
+            )
+
+        return " | ".join(signals) if signals else "no active constraints detected"
 
     def _progress_hint(self) -> float:
         if self.task_config.noise_level <= 0.0:

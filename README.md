@@ -1,10 +1,16 @@
-# IRCE: Learning Recovery Under Tool Failure
+# IRCE: Training Agents to Recover When Workflows Break
 
-**A deterministic OpenEnv benchmark for budget-aware recovery decisions in production-style tool workflows.**
+**Every production AI workflow today handles tool failure with hard-coded rules — retry twice, then stop. Those rules are cheap to write but expensive in production: a misconfigured retry policy burns tokens, exhausts context windows, and creates the infinite loop problem that keeps engineers up at night. IRCE is an RL training environment for the recovery policy itself — so that instead of a hard-coded config, an agent learns when to retry, when to switch tools, when to modify its request, and when to stop.**
+
 
 IRCE focuses on one question:
 
-> When a tool call fails, should the agent retry, modify the request, switch tools, replan, or escalate?
+> When a step in an AI workflow fails, should the orchestrating agent retry, modify the request, switch tools, replan, or escalate to a human?
+
+Simple Example workflow:
+User request → fetch data → call LLM → send result
+
+If the LLM call fails, the agent must decide whether to retry, switch providers, or replan the request.
 
 The project is fully implemented and includes:
 
@@ -16,45 +22,66 @@ The project is fully implemented and includes:
 
 ## Why This Problem Matters
 
-Many LLM agents still recover from failure with simple rules such as:
+AI workflow orchestrators — agents that complete tasks by chaining multiple tool calls — are everywhere. LangChain agents, AutoGen pipelines, Google ADK workflows, OpenAI Assistants with tools. Every one of them needs to handle failure.
 
-- retry up to 3 times
-- switch tools after N errors
-- stop after a fixed budget
+Today, every team handles failure the same way for example:
+```python
+if fail:
+    retry(max_attempts=3)
+else:
+    stop()
+```
 
-Those rules are easy to ship, but they are weak in real systems.
+This is the wrong approach. Real tool failures inside workflows are not all the same:
 
-Real tool failures are not all the same:
+- some are transient and worth retrying immediately
+- some are structural and need the input repaired before retrying
+- some come from rate limits and need a cooldown or a different tool
+- some produce ambiguous partial outputs that look useful but cannot be trusted
+- some drift over time as a dependency degrades under load
 
-- some are transient and worth retrying
-- some are structural and need input repair
-- some come from rate limits and need a cooldown or tool switch
-- some produce ambiguous outputs that look partly useful but are not fully trustworthy
-- some get worse over time as reliability drifts
+A fixed `max_retries=3` rule treats all of these the same. The result in production is wasted API spend, exhausted context windows, repeated calls into already-degraded systems, and workflows that loop until they are killed manually.
 
-The cost of bad recovery is real:
+IRCE turns that recovery decision into a trainable problem. Instead of a rule, the agent learns a policy — one that reads the actual context (error type, budget remaining, cooldown status, recent history) and makes the right call.
 
-- wasted API spend
-- wasted tokens
-- higher latency
-- repeated calls into degraded systems
-- poor user experience from obvious agent thrashing
+Existing systems rely on fixed retry and fallback heuristics; IRCE instead treats recovery as a learnable policy.
 
-IRCE turns that practical recovery problem into a clean, explainable benchmark.
+## Real-World Scenarios
+
+Each task is designed to require a qualitatively different kind of reasoning, not just tolerance for more noise.
+
+- **Task 1: Easy — Single-Signal Decisions** 
+A simple workflow where a single tool call occasionally fails, and the signal is clean.
+Each step presents one dominant signal. TRANSIENT errors call for RETRY. HARD errors call for MODIFY or SWITCH. The budget is generous and error labels are reliable. The agent only needs to read one signal correctly and act on it.
+
+This task checks whether the agent understands the basic meaning of each error type and can map it to the correct recovery action without overreacting or overthinking.
+
+- **Task 2: Medium — Conflicting-Signal Decisions**
+A multi-step workflow where failures introduce competing signals and tradeoffs.
+The correct action now depends on combining multiple signals. A RATE_LIMIT error with cooldown remaining and low budget points to SWITCH — but a RATE_LIMIT error with high budget and partial progress may justify REPLAN instead. Neither option is obviously correct from a single signal alone.
+
+This task tests whether the agent can reason across error type, budget, cooldown, and tool state together — rather than reacting to whichever signal is most obvious.
+
+- **Task 3: Hard — Adaptive Decisions Under a Shifting Policy**
+A production-like workflow where system behavior changes during execution.
+The correct recovery policy shifts mid-episode. What works in early steps stops working later as the hidden failure mode drifts from TRANSIENT to HARD to RATE_LIMIT. Error signals become noisier, and feedback is less reliable.
+The agent must recognize that its current strategy is no longer valid and adapt — without clear confirmation that the new strategy is correct.
+
+This task tests whether the agent can handle non-stationarity and update its behavior in real time, rather than executing a fixed strategy from start to finish.
 
 ## Core Idea
 
-IRCE is not mainly about tool selection.
+IRCE is not about tool selection.
 
-It is about **recovery policy**:
+It is about **recovery policy** — what an AI workflow orchestrator does *after* a step fails:
 
 - retry when the failure looks transient
 - modify when the request looks structurally wrong
 - switch when the active tool path looks degraded or rate-limited
 - replan when the signal is ambiguous
-- escalate when continued action is wasteful
+- escalate when continued action is wasteful and a human needs to intervene
 
-The benchmark asks the agent to make recovery decisions under partial information, budget pressure, ambiguous outcomes, and changing failure modes.
+The benchmark asks the agent to make these decisions under partial information, budget pressure, ambiguous outcomes, and changing failure modes — conditions that hard-coded rules cannot handle cleanly.
 
 ## Why RL Is a Good Fit
 
@@ -66,21 +93,21 @@ This is a sequential decision problem with exactly the properties that make hand
 - **Action consequences**: switching tools, consuming backup routes, or escalating all change later options
 - **Rule brittleness**: a rule like "retry twice, then switch" ignores context such as budget, repeated error history, and noisy observations
 
-A fixed `max_retries` policy cannot handle those tradeoffs cleanly.
+A fixed `max_retries` policy cannot handle those tradeoffs cleanly. A learned policy can.
 
 ## Environment Design
 
 ### Action Space
 
-The action space is intentionally small:
+The action space is intentionally small and maps directly to decisions a workflow orchestrator makes:
 
 | Action | Meaning |
 | --- | --- |
-| `RETRY` | Try the current path again |
-| `MODIFY` | Change the request to address structural failure |
-| `SWITCH` | Move between primary and backup tool paths |
+| `RETRY` | Try the current tool path again |
+| `MODIFY` | Fix the request input to address a structural failure |
+| `SWITCH` | Move to the backup tool path |
 | `REPLAN` | Reframe the next attempt, especially after ambiguity or cooldown pressure |
-| `ESCALATE` | Stop early and hand off |
+| `ESCALATE` | Stop and hand off to a human or fallback system |
 
 ### Observation Space
 
@@ -99,12 +126,12 @@ Each observation is compact and LLM-friendly:
 - `history_tail`
 - `status_summary`
 
-Important detail:
+Key details:
 
 - `tool_result` can be `SUCCESS`, `ERROR`, or `AMBIGUOUS`
 - `progress_hint` is useful but not perfectly trustworthy on noisier tasks
 - `history_tail` gives a short recent trace instead of a full trajectory dump
-- `status_summary` gives a one-line, judge-readable decision context for LLM agents
+- `status_summary` gives a one-line, human-readable decision context for LLM agents
 
 ### Hidden State
 
@@ -119,41 +146,41 @@ The hidden state keeps the environment realistic while staying lightweight:
 
 ### Core Mechanics
 
-IRCE adds two simple but high-value mechanics that make it feel less like a toy benchmark:
+IRCE adds two mechanics that capture failure modes every production orchestration engineer has seen:
 
 1. **Ambiguous outcomes**
 
-Some actions do not cleanly fail or succeed. They return `AMBIGUOUS`, give partial progress, and force the agent to decide whether to retry, modify, or replan.
+Some tool calls do not cleanly fail or succeed. They return `AMBIGUOUS`, give partial progress, and force the agent to decide whether to retry, modify, or replan. This mirrors real cases where an API returns partial data, an LLM output passes schema validation but is semantically wrong, or a downstream service responds slowly with an incomplete result.
 
 2. **Tool tradeoffs and cooldowns**
 
-The backup tool path is often more reliable, but it costs more budget. Rate-limited states expose a cooldown signal, so repeatedly retrying the same path is meaningfully bad.
+The backup tool path is often more reliable but costs more budget. Rate-limited states expose a cooldown signal, making repeated retries on the same path meaningfully bad. The agent has to weigh cost against reliability in real time.
 
-These mechanics are cheap to simulate, deterministic with a seed, and easy for judges to understand.
+These mechanics are cheap to simulate, deterministic with a seed, and directly reflect the failure patterns teams encounter when running LLM-powered workflows in production.
 
 ## Task Suite
 
 IRCE has three deterministic task profiles with clear difficulty progression.
 
-### Task 1: Easy
+### Task 1: Easy — Single API, Transient Failures
 
 - transient and hard failures only
 - generous budget
 - almost no observation noise
 - low ambiguity
 
-This task checks whether the agent can make basic repair decisions without overreacting.
+A single tool inside the workflow fails occasionally. The agent must make basic repair decisions without overreacting to noise.
 
-### Task 2: Medium
+### Task 2: Medium — Rate Limits and Routing Tradeoffs
 
 - adds rate limits and cooldown behavior
 - moderate ambiguity
 - moderate budget pressure
 - primary versus backup tradeoff matters
 
-This task tests whether the agent can stop bad retries and route around degraded tool paths.
+The workflow hits rate limits mid-execution. Retrying the same provider wastes budget. The agent must recognize the pattern and route around degraded paths.
 
-### Task 3: Hard
+### Task 3: Hard — Drifting Reliability Under Pressure
 
 - lower budget
 - noisier error labels
@@ -161,63 +188,77 @@ This task tests whether the agent can stop bad retries and route around degraded
 - cascading penalties on repeated failure
 - costly backup routing
 
-This task asks the agent to stay stable under uncertainty while still finishing efficiently.
+A third-party tool degrades step by step during execution. Error signals are noisy. The backup path is expensive. The agent must stay stable and efficient under conditions that look nothing like the easy case.
 
 ## Reward Design
 
 The reward is dense, deterministic, and aligned with recovery quality.
 
-Positive signals:
+Each step produces a structured reward composed of multiple components:
 
-- `+0.3` for useful progress
-- `+0.15` for ambiguous partial progress
-- `+1.0` for task completion
+- step cost to discourage unnecessary actions
+- progress bonus for meaningful forward movement
+- ambiguity bonus for resolving partial outcomes
+- completion bonus for finishing the task
+- penalties for repeated failures, bad retries, and inefficient actions
 
-Negative signals:
+Key signals:
 
-- `-0.1` per step
+- `+0.3` for strong progress
+- `+0.15` for resolving ambiguity
+- `+0.9` for task completion
+- `-0.1` per step (efficiency pressure)
 - `-0.2` for repeated same-error failures
 - `-0.3` for bad retries on `HARD` or `RATE_LIMIT`
-- switch and backup-cost penalty
-- extra cascade penalty on harder tasks
-- early escalation penalty when the agent gives up too soon
+- switching cost and backup routing penalties
+- cascade penalties on harder tasks
+- early escalation penalty
 
-This reward encourages agents to move quickly, avoid thrashing, and treat ambiguity as something to resolve rather than ignore.
+Each step reward is computed using a structured breakdown (see `RewardBreakdown` in code), ensuring transparency and deterministic evaluation.
 
 ## Grading
 
 Grading is deterministic and returns a final score in `[0.0, 1.0]`.
 
-The current grader combines four components:
+The grader evaluates four components:
 
-- **Completion**: full credit for success, partial credit for controlled escalation after meaningful progress
-- **Efficiency**: fewer steps is better
-- **Cost**: preserving budget is better
-- **Recovery quality**: fewer bad retries, better ambiguity handling, and cleaner exits
+- **Completion**
+  - Full credit for successful completion
+  - Partial credit for controlled escalation after meaningful progress
+
+- **Efficiency**
+  - Fewer steps → higher score
+
+- **Cost**
+  - Preserving budget → higher score
+
+- **Recovery quality**
+  - Penalizes bad retries
+  - Rewards resolving ambiguity
+  - Penalizes exhausting budget
+  - Rewards controlled escalation
 
 Formula:
 
-```text
 score =
     0.45 * completion
   + 0.25 * efficiency
   + 0.15 * cost
   + 0.15 * recovery_quality
-```
 
-This makes the benchmark more faithful to real-world recovery behavior than scoring on completion alone.
+Recovery quality explicitly measures how well the agent handles failure patterns, not just whether it completes the task.
 
 ## Example Episode
 
 Example trajectory from the current implementation:
 
 | Step | Action | Tool Result | Error Type | Tool | Budget | Reward | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | reset | ERROR | HARD | primary | 1.00 | 0.000 | Workflow starts in a hard-failure state |
-| 1 | MODIFY | SUCCESS | TRANSIENT | primary | 0.90 | 0.199 | Input repair helps and progress jumps |
-| 2 | RETRY | AMBIGUOUS | TRANSIENT | primary | 0.80 | 0.049 | Partial progress, but signal is unclear |
-| 3 | REPLAN | AMBIGUOUS | TRANSIENT | primary | 0.70 | 0.049 | Agent stabilizes the next attempt |
-| 4 | REPLAN | SUCCESS | TRANSIENT | primary | 0.60 | 0.899 | Ambiguity resolves and the task completes |
+| ---  | ---    | ---         | ---        | ---  | ---    | ---    | ---   |
+| 0    | reset  | ERROR       | HARD       | primary | 1.00 | 0.000 | Workflow starts in a hard-failure state |
+| 1    | MODIFY | SUCCESS     | TRANSIENT  | primary | 0.90 | 0.199 | Input repair helps and progress jumps |
+| 2    | RETRY  | AMBIGUOUS   | TRANSIENT  | primary | 0.80 | 0.049 | Partial progress, but signal is unclear |
+| 3    | REPLAN | AMBIGUOUS   | TRANSIENT  | primary | 0.70 | 0.049 | Agent stabilizes the next attempt |
+| 4    | REPLAN | SUCCESS     | TRANSIENT  | primary | 0.60 | 0.899 | Ambiguity resolves and the task completes |
 
 This is the central IRCE behavior: the agent is judged on what it does after failure and uncertainty, not just on whether it can call a tool.
 
@@ -234,27 +275,34 @@ In this state, a strong policy should avoid immediate retry and prefer `SWITCH` 
 
 ## Baseline Results
 
-The provided `inference.py` uses the OpenAI client for model calls and falls back to a deterministic rule-based policy when credentials or model requests are unavailable. The fallback policy uses:
+The provided `inference.py` uses the OpenAI client with a strict rule-based prompting strategy.
 
-- `error_type`
-- `same_error_count`
-- `budget_remaining`
-- `step_count`
-- `active_tool`
-- `cooldown_remaining`
-- `progress_hint`
-- short memory of recent outcomes
+The model is instructed to follow a priority-ordered decision policy:
 
-Current reproducible baseline with the default seed:
+- escalate under low budget or repeated failure
+- switch on rate limits or persistent hard failures
+- modify inputs for structural issues
+- replan under ambiguity or cooldown constraints
+- retry only when safe (transient + no cooldown)
 
-```text
-task_1 score: 0.815
-task_2 score: 0.898
-task_3 score: 0.874
-average score: 0.863
-```
+The script enforces:
 
-Across a 100-seed sweep during development, the upgraded baseline improved the average score from `0.751` to `0.805`.
+- strict parsing of model output into valid actions
+- rejection of invalid or ambiguous outputs
+- deterministic execution with a fixed seed
+
+Each step logs:
+
+- action taken
+- reward
+- error type
+- tool result (SUCCESS / ERROR / AMBIGUOUS)
+
+Example log format:
+
+[STEP] step=2 action=MODIFY reward=0.20 done=false error=TRANSIENT result=SUCCESS
+
+This ensures reproducibility and compatibility with OpenEnv evaluation.
 
 ## Why IRCE Is Novel
 
