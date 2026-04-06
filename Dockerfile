@@ -4,29 +4,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+ENV ENABLE_WEB_INTERFACE=true    
+
 WORKDIR /app
 
-<<<<<<< HEAD
-# Copy dependency manifests + source (needed for pip install -e .)
-COPY requirements.txt pyproject.toml ./
-COPY src/ ./src/
-
-# Install all dependencies + register the irce package
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install -e .
-
-# Copy remaining project files (server/, inference.py, etc.)
-=======
-# Install package and dependencies in one layer.
-# Copying pyproject.toml first leverages Docker layer caching.
+# 1. Copy config files first (for caching)
 COPY pyproject.toml requirements.txt ./
+
+# 2. Copy src (CRITICAL for pip install)
+COPY src ./src
+
+# 3. Install dependencies + package
 RUN pip install --upgrade pip && pip install .
 
-# Copy source last so code changes don't bust the dependency cache.
->>>>>>> 9b34442430b98e9efb51d76a40f653bc7bde7b4d
+# 4. Copy rest of the project (server/, etc.)
 COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "irce.server.app:app", "--host", "0.0.0.0", "--port", "8000"]
