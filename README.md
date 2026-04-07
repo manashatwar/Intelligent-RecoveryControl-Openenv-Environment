@@ -339,7 +339,7 @@ source .venv/bin/activate
 ### Run the Environment Server
 
 ```bash
-uv run uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn server.app:app --host 0.0.0.0 --port 7860 --reload
 ```
 
 ### Run the Baseline Inference Script
@@ -366,9 +366,9 @@ uv run python inference.py
 ### Quick API Check
 
 ```bash
-curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/reset
-curl -X POST http://127.0.0.1:8000/step \
+curl http://127.0.0.1:7860/health
+curl -X POST http://127.0.0.1:7860/reset
+curl -X POST http://127.0.0.1:7860/step \
   -H "Content-Type: application/json" \
   -d '{"action":{"action_type":"RETRY"}}'
 ```
@@ -379,12 +379,107 @@ curl -X POST http://127.0.0.1:8000/step \
 
 ```bash
 docker build -t irce:dev .
-docker run --rm -p 8000:8000 irce:dev
+docker run --rm -p 7860:7860 irce:dev
 ```
 
-### OpenEnv and Hugging Face Space Readiness
+### Hugging Face Spaces Deployment
 
-This project is packaged for OpenEnv deployment:
+This project is fully configured for Hugging Face Spaces deployment.
+
+#### Prerequisites
+
+1. Create a Hugging Face account at https://huggingface.co
+2. Install the HF CLI:
+
+```bash
+pip install huggingface-hub
+huggingface-cli login
+```
+
+#### Deploy to Hugging Face Spaces
+
+1. **Create a new Space on Hugging Face**
+
+   Visit https://huggingface.co/new-space and select:
+   - Space name: `irce` (or your preferred name)
+   - License: OpenRAIL-M (or your choice)
+   - Space SDK: `Docker`
+
+2. **Push your code to the Space**
+
+   ```bash
+   git remote add space https://huggingface.co/spaces/{your-username}/irce
+   git push space main
+   ```
+
+   Or clone and push:
+
+   ```bash
+   git clone https://huggingface.co/spaces/{your-username}/irce
+   cd irce
+   git remote add upstream {your-original-repo}
+   git pull upstream main
+   git push origin main
+   ```
+
+3. **Set up Environment Variables (Secrets)**
+
+   In your Space settings (https://huggingface.co/spaces/{your-username}/irce/settings):
+   
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `API_BASE_URL`: Your API endpoint (if using custom base)
+   - `MODEL_NAME`: Model name (default: gpt-4o)
+   - `HF_TOKEN`: Your Hugging Face token
+
+4. **Configuration**
+
+   The Space will automatically:
+   - Read the `Dockerfile`
+   - Build and deploy on port `7860`
+   - Expose the FastAPI app at the Space URL
+
+#### Space YAML Configuration (Optional)
+
+If you want to customize Space behavior, create a `.huggingface/space_config.yaml`:
+
+```yaml
+title: IRCE - Intelligent Recovery Control Environment
+description: >
+  An RL training environment for recovery policy in AI workflows.
+  Agents learn when to retry, modify, switch tools, replan, or escalate.
+app_port: 7860
+sdk: docker
+emoji: 🤖
+```
+
+#### Quick Push to HF Spaces
+
+Once your Space is created on Hugging Face:
+
+```bash
+# Replace {your-username} with your actual Hugging Face username
+git remote add space https://huggingface.co/spaces/{your-username}/irce
+
+# Push your code to the Space
+git push space main
+```
+
+Or if you already have an origin remote, replace it:
+
+```bash
+git remote set-url space https://huggingface.co/spaces/{your-username}/irce
+git push space main
+```
+
+**After pushing:**
+1. Go to your Space URL: `https://huggingface.co/spaces/{your-username}/irce`
+2. Wait for the build to complete (watch logs in Space Settings)
+3. Once live, add secrets in Space Settings → Repository secrets
+4. The app will automatically restart with your secrets
+
+#### Verify OpenEnv Compatibility
+
+This project is also packaged for OpenEnv deployment:
 
 - `openenv.yaml` is included
 - `Dockerfile` is included
