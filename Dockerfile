@@ -20,6 +20,6 @@ RUN pip install --upgrade pip && pip install .
 # 4. Copy rest of the project (server/, etc.)
 COPY . .
 
-EXPOSE 8000
+EXPOSE 7860
 
-CMD ["uvicorn", "irce.server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "irce.server.app:app", "--host", "0.0.0.0", "--port", "7860"]

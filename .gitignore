@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .venv-linux/
 .env
+secrets.toml
 outputs/
 *.egg-info/
 dist/
