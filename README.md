@@ -1,3 +1,12 @@
+---
+title: Irce
+emoji: 🏆
+colorFrom: yellow
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # IRCE: Training Agents to Recover When Workflows Break
 
 **Every production AI workflow today handles tool failure with hard-coded rules — retry twice, then stop. Those rules are cheap to write but expensive in production: a misconfigured retry policy burns tokens, exhausts context windows, and creates the infinite loop problem that keeps engineers up at night. IRCE is an RL training environment for the recovery policy itself — so that instead of a hard-coded config, an agent learns when to retry, when to switch tools, when to modify its request, and when to stop.**
@@ -370,7 +379,7 @@ curl http://127.0.0.1:7860/health
 curl -X POST http://127.0.0.1:7860/reset
 curl -X POST http://127.0.0.1:7860/step \
   -H "Content-Type: application/json" \
-  -d '{"action":{"action_type":"RETRY"}}'
+  -d '{"action_type":"RETRY"}'
 ```
 
 ## Deployment
@@ -508,3 +517,6 @@ IRCE is small enough to run cheaply, but the decision problem is real.
 In production agent systems, the most expensive mistake is often not the first failure. It is what the agent does next.
 
 IRCE gives that recovery problem a deterministic, OpenEnv-compatible benchmark that is easy to validate, easy to explain, and hard enough to be interesting.
+
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
