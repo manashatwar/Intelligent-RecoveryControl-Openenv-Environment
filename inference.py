@@ -1,24 +1,39 @@
+"""
+inference.py — AI Pipeline Recovery openENV agent
+
+Communicates with the env server over HTTP (OpenEnv standard API):
+  POST {ENV_BASE_URL}/api/reset  -> observation dict
+  POST {ENV_BASE_URL}/api/step   -> observation dict
+
+External dependencies (from requirements.txt only):
+  openai, python-dotenv, requests
+"""
+
 import argparse
 import os
 import re
 import sys
-import random
 from typing import Optional, List
 
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
-
-from ai_pipeline_recovery.environment import IRCEEnv
-from ai_pipeline_recovery.models import IRCEAction, IRCEObservation
-from ai_pipeline_recovery.tasks import build_task_registry
-from ai_pipeline_recovery.grading import grade_episode
 
 load_dotenv()
 
 # ===== ENV CONFIG =====
-API_BASE_URL = os.getenv("API_BASE_URL")
-MODEL_NAME = os.getenv("MODEL_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+# ENV_BASE_URL: URL of the running env container (e.g. http://localhost:7860)
+# API_BASE_URL: LLM provider base URL
+# MODEL_NAME:   model to call
+# API_KEY:      HF_TOKEN or OPENAI_API_KEY
+
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "").rstrip("/")
+API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")
+MODEL_NAME = os.getenv("MODEL_NAME", "")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY", "")
+
+TASK_IDS = [1, 2, 3]
+TASK_MAX_STEPS = {1: 6, 2: 6, 3: 7}
 
 SUPPORTED_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
 
@@ -40,6 +55,7 @@ Apply these rules in order — use the FIRST rule whose condition is true:
 
 Do NOT explain. Output ONLY one word."""
 
+
 # ===== LOGGING =====
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -55,7 +71,6 @@ def log_step(
 ) -> None:
     err = error if error is not None else "null"
     result = tool_result if tool_result is not None else "unknown"
-
     print(
         f"[STEP] step={step} action={action} reward={reward:.2f} "
         f"done={str(done).lower()} error={err} result={result}",
@@ -72,7 +87,24 @@ def log_end(success: bool, steps: int, rewards: List[float], score: float) -> No
     )
 
 
-# ===== PARSER =====
+# ===== HTTP ENV CLIENT =====
+def env_reset(task_id: int, seed: int) -> dict:
+    """Call POST /api/reset on the env container."""
+    url = f"{ENV_BASE_URL}/api/reset"
+    resp = requests.post(url, json={"task_id": task_id, "seed": seed}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def env_step(action: str) -> dict:
+    """Call POST /api/step on the env container."""
+    url = f"{ENV_BASE_URL}/api/step"
+    resp = requests.post(url, json={"action_type": action}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ===== ACTION PARSER =====
 def parse_action(text: str) -> str:
     if not text or not text.strip():
         raise ValueError("Model returned empty output")
@@ -99,23 +131,25 @@ def parse_action(text: str) -> str:
 
 
 # ===== MODEL CALL =====
-def get_action(client: OpenAI, observation: IRCEObservation, step: int) -> str:
-    progress_pct = f"{observation.progress_hint:.0%}"
-    budget_pct = f"{observation.budget_remaining:.0%}"
+def get_action(client: OpenAI, obs: dict, step: int) -> str:
+    progress = obs.get("progress_hint", 0.0)
+    budget = obs.get("budget_remaining", 1.0)
+    progress_pct = f"{progress:.0%}"
+    budget_pct = f"{budget:.0%}"
 
     prompt = (
         f"Step: {step}\n"
-        f"Goal: {observation.goal}\n\n"
-        f"tool_result: {observation.tool_result}\n"
-        f"error_type: {observation.error_type}\n"
-        f"same_error_count: {observation.same_error_count}\n"
-        f"cooldown_remaining: {observation.cooldown_remaining}\n"
-        f"budget_remaining: {observation.budget_remaining:.2f} ({budget_pct})\n"
-        f"active_tool: {observation.active_tool}\n"
-        f"progress: {observation.progress_hint:.2f} ({progress_pct})\n"
-        f"step: {observation.step_count}\n\n"
-        f"{observation.status_summary}\n"
-        f"{observation.decision_context}\n"
+        f"Goal: {obs.get('goal', '')}\n\n"
+        f"tool_result: {obs.get('tool_result', 'unknown')}\n"
+        f"error_type: {obs.get('error_type', 'unknown')}\n"
+        f"same_error_count: {obs.get('same_error_count', 0)}\n"
+        f"cooldown_remaining: {obs.get('cooldown_remaining', 0)}\n"
+        f"budget_remaining: {budget:.2f} ({budget_pct})\n"
+        f"active_tool: {obs.get('active_tool', 'unknown')}\n"
+        f"progress: {progress:.2f} ({progress_pct})\n"
+        f"step: {obs.get('step_count', step)}\n\n"
+        f"{obs.get('status_summary', '')}\n"
+        f"{obs.get('decision_context', '')}\n"
     )
 
     try:
@@ -128,49 +162,60 @@ def get_action(client: OpenAI, observation: IRCEObservation, step: int) -> str:
             temperature=0.0,
             max_tokens=10,
         )
-
         raw_text = completion.choices[0].message.content or ""
         return parse_action(raw_text)
     except Exception as e:
-        print(f"[WARNING] API or parsing error: {e}", flush=True)
+        print(f"[WARNING] API or parsing error at step {step}: {e}", flush=True)
         return "MODIFY"
 
 
 # ===== TASK RUNNER =====
 def run_task(task_id: int, seed: int, client: OpenAI) -> None:
-    env = IRCEEnv(task_id=task_id, seed=seed)
-    task_config = build_task_registry()[task_id]
     task_name = f"task_{task_id}"
+    max_steps = TASK_MAX_STEPS.get(task_id, 6)
 
     rewards: List[float] = []
     steps = 0
+    score = 0.0
 
     log_start(task=task_name, env="openENV", model=MODEL_NAME)
 
     try:
-        obs = env.reset(seed=seed, task_id=task_id)
+        obs = env_reset(task_id=task_id, seed=seed)
 
-        for step in range(1, task_config.max_steps + 1):
-            if obs.done:
+        for step in range(1, max_steps + 1):
+            if obs.get("done", False):
                 break
 
             action_str = get_action(client, obs, step)
-            obs = env.step(IRCEAction(action_type=action_str))
 
-            reward = float(obs.reward or 0.0)
-            done = bool(obs.done)
+            try:
+                obs = env_step(action_str)
+            except Exception as e:
+                print(f"[WARNING] env step error at step {step}: {e}", flush=True)
+                break
+
+            reward = float(obs.get("reward") or 0.0)
+            done = bool(obs.get("done", False))
 
             rewards.append(reward)
             steps = step
 
-            log_step(step, action_str, reward, done, obs.error_type, obs.tool_result)
+            log_step(
+                step,
+                action_str,
+                reward,
+                done,
+                obs.get("error_type"),
+                obs.get("tool_result"),
+            )
 
             if done:
                 break
 
-        success = bool(obs.done)
-        score = grade_episode(env.episode_log)
-
+        success = bool(obs.get("done", False))
+        # Score from response if available, else compute from rewards
+        score = float(obs.get("score") or (sum(rewards) / max(len(rewards), 1)))
         log_end(success=success, steps=steps, rewards=rewards, score=score)
 
     except Exception as e:
@@ -184,24 +229,30 @@ def main() -> None:
         parser = argparse.ArgumentParser(description="AI Pipeline Recovery inference runner")
         parser.add_argument("--seed", type=int, default=42)
         args = parser.parse_args()
-
         seed = args.seed
 
-        # Validate env vars here so a missing var doesn't crash at module level
-        if not API_BASE_URL or not MODEL_NAME or not API_KEY:
-            print(
-                "[FATAL] Missing required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN/OPENAI_API_KEY",
-                flush=True,
-            )
+        # Validate required env vars
+        missing = []
+        if not ENV_BASE_URL:
+            missing.append("ENV_BASE_URL")
+        if not API_BASE_URL:
+            missing.append("API_BASE_URL")
+        if not MODEL_NAME:
+            missing.append("MODEL_NAME")
+        if not API_KEY:
+            missing.append("HF_TOKEN or OPENAI_API_KEY")
+
+        if missing:
+            print(f"[FATAL] Missing required env vars: {', '.join(missing)}", flush=True)
             sys.exit(1)
 
         client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-        for task_id in sorted(build_task_registry()):
+        for task_id in TASK_IDS:
             run_task(task_id, seed, client)
 
     except SystemExit:
-        raise  # allow sys.exit() to propagate normally
+        raise
     except Exception as e:
         print(f"[FATAL] Unexpected error in main: {e}", flush=True)
         sys.exit(1)
