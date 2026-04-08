@@ -1,3 +1,13 @@
+---
+title: AI Pipeline Recovery openENV Environment
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # AI Pipeline Recovery openENV Environment: Training Agents to Recover When Workflows Break
 
 **Every production AI workflow today handles tool failure with hard-coded rules — retry twice, then stop. Those rules are cheap to write but expensive in production: a misconfigured retry policy burns tokens, exhausts context windows, and creates the infinite loop problem that keeps engineers up at night. AI Pipeline Recovery openENV Environment is an RL training environment for the recovery policy itself — so that instead of a hard-coded config, an agent learns when to retry, when to switch tools, when to modify its request, and when to stop.**
