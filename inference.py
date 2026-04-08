@@ -125,18 +125,22 @@ def get_action(client: OpenAI, observation: IRCEObservation, step: int) -> str:
         f"{observation.decision_context}\n"
     )
 
-    completion = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.0,
-        max_tokens=10,
-    )
+    try:
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=10,
+        )
 
-    raw_text = completion.choices[0].message.content or ""
-    return parse_action(raw_text)
+        raw_text = completion.choices[0].message.content or ""
+        return parse_action(raw_text)
+    except Exception as e:
+        print(f"[WARNING] API or parsing error: {e}", flush=True)
+        return "MODIFY"
 
 
 # ===== TASK RUNNER =====
@@ -150,30 +154,35 @@ def run_task(task_id: int, seed: int, client: OpenAI) -> None:
 
     log_start(task=task_name, env="openENV", model=MODEL_NAME)
 
-    obs = env.reset(seed=seed, task_id=task_id)
+    try:
+        obs = env.reset(seed=seed, task_id=task_id)
 
-    for step in range(1, task_config.max_steps + 1):
-        if obs.done:
-            break
+        for step in range(1, task_config.max_steps + 1):
+            if obs.done:
+                break
 
-        action_str = get_action(client, obs, step)
-        obs = env.step(IRCEAction(action_type=action_str))
+            action_str = get_action(client, obs, step)
+            obs = env.step(IRCEAction(action_type=action_str))
 
-        reward = float(obs.reward or 0.0)
-        done = bool(obs.done)
+            reward = float(obs.reward or 0.0)
+            done = bool(obs.done)
 
-        rewards.append(reward)
-        steps = step
+            rewards.append(reward)
+            steps = step
 
-        log_step(step, action_str, reward, done, obs.error_type, obs.tool_result)
+            log_step(step, action_str, reward, done, obs.error_type, obs.tool_result)
 
-        if done:
-            break
+            if done:
+                break
 
-    success = bool(obs.done)
-    score = grade_episode(env.episode_log)
+        success = bool(obs.done)
+        score = grade_episode(env.episode_log)
 
-    log_end(success=success, steps=steps, rewards=rewards, score=score)
+        log_end(success=success, steps=steps, rewards=rewards, score=score)
+
+    except Exception as e:
+        print(f"[ERROR] Task {task_id} failed: {e}", flush=True)
+        log_end(success=False, steps=steps, rewards=rewards, score=0.0)
 
 
 # ===== ENTRY POINT =====
