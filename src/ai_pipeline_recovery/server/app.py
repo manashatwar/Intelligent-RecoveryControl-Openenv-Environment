@@ -6,8 +6,8 @@ except ImportError:  # pragma: no cover
     from openenv_core.env_server import create_fastapi_app
 
 try:
-    from irce.environment import IRCEEnv
-    from irce.models import IRCEAction, IRCEObservation
+    from ai_pipeline_recovery.environment import IRCEEnv
+    from ai_pipeline_recovery.models import IRCEAction, IRCEObservation
 except ImportError:  # pragma: no cover
     from environment import IRCEEnv
     from models import IRCEAction, IRCEObservation

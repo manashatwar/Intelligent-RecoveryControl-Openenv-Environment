@@ -6,10 +6,10 @@ import uvicorn
 
 
 def main() -> None:
-    app_path = "irce.server.app:app"
+    app_path = "ai_pipeline_recovery.server.app:app"
 
     try:
-        __import__("irce.server.app")
+        __import__("ai_pipeline_recovery.server.app")
     except ImportError:  # pragma: no cover
         app_path = "server.app:app"
 

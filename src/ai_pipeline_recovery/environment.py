@@ -29,9 +29,9 @@ else:
         from openenv_core.env_server import Environment
 
 try:
-    from irce.models import IRCEAction, IRCEObservation, IRCEState
-    from irce.rewards import compute_step_reward
-    from irce.tasks import TaskConfig, get_task_config
+    from ai_pipeline_recovery.models import IRCEAction, IRCEObservation, IRCEState
+    from ai_pipeline_recovery.rewards import compute_step_reward
+    from ai_pipeline_recovery.tasks import TaskConfig, get_task_config
 except ImportError:  # pragma: no cover
     from models import IRCEAction, IRCEObservation, IRCEState
     from rewards import compute_step_reward

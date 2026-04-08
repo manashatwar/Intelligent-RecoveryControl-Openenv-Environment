@@ -1,18 +1,9 @@
----
-title: Irce
-emoji: 🏆
-colorFrom: yellow
-colorTo: indigo
-sdk: docker
-pinned: false
----
+# AI Pipeline Recovery openENV Environment: Training Agents to Recover When Workflows Break
 
-# IRCE: Training Agents to Recover When Workflows Break
-
-**Every production AI workflow today handles tool failure with hard-coded rules — retry twice, then stop. Those rules are cheap to write but expensive in production: a misconfigured retry policy burns tokens, exhausts context windows, and creates the infinite loop problem that keeps engineers up at night. IRCE is an RL training environment for the recovery policy itself — so that instead of a hard-coded config, an agent learns when to retry, when to switch tools, when to modify its request, and when to stop.**
+**Every production AI workflow today handles tool failure with hard-coded rules — retry twice, then stop. Those rules are cheap to write but expensive in production: a misconfigured retry policy burns tokens, exhausts context windows, and creates the infinite loop problem that keeps engineers up at night. AI Pipeline Recovery openENV Environment is an RL training environment for the recovery policy itself — so that instead of a hard-coded config, an agent learns when to retry, when to switch tools, when to modify its request, and when to stop.**
 
 
-IRCE focuses on one question:
+AI Pipeline Recovery openENV Environment focuses on one question:
 
 > When a step in an AI workflow fails, should the orchestrating agent retry, modify the request, switch tools, replan, or escalate to a human?
 
@@ -51,9 +42,9 @@ This is the wrong approach. Real tool failures inside workflows are not all the 
 
 A fixed `max_retries=3` rule treats all of these the same. The result in production is wasted API spend, exhausted context windows, repeated calls into already-degraded systems, and workflows that loop until they are killed manually.
 
-IRCE turns that recovery decision into a trainable problem. Instead of a rule, the agent learns a policy — one that reads the actual context (error type, budget remaining, cooldown status, recent history) and makes the right call.
+AI Pipeline Recovery openENV Environment turns that recovery decision into a trainable problem. Instead of a rule, the agent learns a policy — one that reads the actual context (error type, budget remaining, cooldown status, recent history) and makes the right call.
 
-Existing systems rely on fixed retry and fallback heuristics; IRCE instead treats recovery as a learnable policy.
+Existing systems rely on fixed retry and fallback heuristics; AI Pipeline Recovery openENV Environment instead treats recovery as a learnable policy.
 
 ## Real-World Scenarios
 
@@ -80,7 +71,7 @@ This task tests whether the agent can handle non-stationarity and update its beh
 
 ## Core Idea
 
-IRCE is not about tool selection.
+AI Pipeline Recovery openENV Environment is not about tool selection.
 
 It is about **recovery policy** — what an AI workflow orchestrator does *after* a step fails:
 
@@ -155,7 +146,7 @@ The hidden state keeps the environment realistic while staying lightweight:
 
 ### Core Mechanics
 
-IRCE adds two mechanics that capture failure modes every production orchestration engineer has seen:
+AI Pipeline Recovery openENV Environment adds two mechanics that capture failure modes every production orchestration engineer has seen:
 
 1. **Ambiguous outcomes**
 
@@ -169,7 +160,7 @@ These mechanics are cheap to simulate, deterministic with a seed, and directly r
 
 ## Task Suite
 
-IRCE has three deterministic task profiles with clear difficulty progression.
+AI Pipeline Recovery openENV Environment has three deterministic task profiles with clear difficulty progression.
 
 ### Task 1: Easy — Single API, Transient Failures
 
@@ -269,7 +260,7 @@ Example trajectory from the current implementation:
 | 3    | REPLAN | AMBIGUOUS   | TRANSIENT  | primary | 0.70 | 0.049 | Agent stabilizes the next attempt |
 | 4    | REPLAN | SUCCESS     | TRANSIENT  | primary | 0.60 | 0.899 | Ambiguity resolves and the task completes |
 
-This is the central IRCE behavior: the agent is judged on what it does after failure and uncertainty, not just on whether it can call a tool.
+This is the central AI Pipeline Recovery openENV Environment behavior: the agent is judged on what it does after failure and uncertainty, not just on whether it can call a tool.
 
 ### Hard-Task Snapshot
 
@@ -313,17 +304,17 @@ Example log format:
 
 This ensures reproducibility and compatibility with OpenEnv evaluation.
 
-## Why IRCE Is Novel
+## Why AI Pipeline Recovery openENV Environment Is Novel
 
 Benchmarks such as ToolBench and API-Bank mostly focus on whether an agent can choose and use tools correctly to finish a task.
 
-IRCE focuses on a different and highly practical question:
+AI Pipeline Recovery openENV Environment focuses on a different and highly practical question:
 
 > What should the agent do after a tool failure or ambiguous outcome?
 
 That difference matters in production systems, where many agent failures come from weak recovery behavior rather than weak tool coverage.
 
-IRCE is therefore a benchmark for:
+AI Pipeline Recovery openENV Environment is therefore a benchmark for:
 
 - recovery under uncertainty
 - cost-aware tool fallback
@@ -379,7 +370,7 @@ curl http://127.0.0.1:7860/health
 curl -X POST http://127.0.0.1:7860/reset
 curl -X POST http://127.0.0.1:7860/step \
   -H "Content-Type: application/json" \
-  -d '{"action_type":"RETRY"}'
+  -d '{"action":{"action_type":"RETRY"}}'
 ```
 
 ## Deployment
@@ -387,8 +378,8 @@ curl -X POST http://127.0.0.1:7860/step \
 ### Docker
 
 ```bash
-docker build -t irce:dev .
-docker run --rm -p 7860:7860 irce:dev
+docker build -t ai_pipeline_recovery:dev .
+docker run --rm -p 7860:7860 ai_pipeline_recovery:dev
 ```
 
 ### Hugging Face Spaces Deployment
@@ -410,22 +401,22 @@ huggingface-cli login
 1. **Create a new Space on Hugging Face**
 
    Visit https://huggingface.co/new-space and select:
-   - Space name: `irce` (or your preferred name)
+   - Space name: `ai_pipeline_recovery` (or your preferred name)
    - License: OpenRAIL-M (or your choice)
    - Space SDK: `Docker`
 
 2. **Push your code to the Space**
 
    ```bash
-   git remote add space https://huggingface.co/spaces/{your-username}/irce
+   git remote add space https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery
    git push space main
    ```
 
    Or clone and push:
 
    ```bash
-   git clone https://huggingface.co/spaces/{your-username}/irce
-   cd irce
+   git clone https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery
+   cd ai_pipeline_recovery
    git remote add upstream {your-original-repo}
    git pull upstream main
    git push origin main
@@ -433,7 +424,7 @@ huggingface-cli login
 
 3. **Set up Environment Variables (Secrets)**
 
-   In your Space settings (https://huggingface.co/spaces/{your-username}/irce/settings):
+   In your Space settings (https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery/settings):
    
    - `OPENAI_API_KEY`: Your OpenAI API key
    - `API_BASE_URL`: Your API endpoint (if using custom base)
@@ -452,7 +443,7 @@ huggingface-cli login
 If you want to customize Space behavior, create a `.huggingface/space_config.yaml`:
 
 ```yaml
-title: IRCE - Intelligent Recovery Control Environment
+title: AI Pipeline Recovery openENV Environment - Intelligent Recovery Control Environment
 description: >
   An RL training environment for recovery policy in AI workflows.
   Agents learn when to retry, modify, switch tools, replan, or escalate.
@@ -467,7 +458,7 @@ Once your Space is created on Hugging Face:
 
 ```bash
 # Replace {your-username} with your actual Hugging Face username
-git remote add space https://huggingface.co/spaces/{your-username}/irce
+git remote add space https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery
 
 # Push your code to the Space
 git push space main
@@ -476,12 +467,12 @@ git push space main
 Or if you already have an origin remote, replace it:
 
 ```bash
-git remote set-url space https://huggingface.co/spaces/{your-username}/irce
+git remote set-url space https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery
 git push space main
 ```
 
 **After pushing:**
-1. Go to your Space URL: `https://huggingface.co/spaces/{your-username}/irce`
+1. Go to your Space URL: `https://huggingface.co/spaces/{your-username}/ai_pipeline_recovery`
 2. Wait for the build to complete (watch logs in Space Settings)
 3. Once live, add secrets in Space Settings → Repository secrets
 4. The app will automatically restart with your secrets
@@ -510,13 +501,10 @@ The current benchmark is intentionally lightweight. Good next steps are:
 - replay from real API failure traces
 - richer escalation policies and handoff objectives
 
-## Why IRCE Is Useful
+## Why AI Pipeline Recovery openENV Environment Is Useful
 
-IRCE is small enough to run cheaply, but the decision problem is real.
+AI Pipeline Recovery openENV Environment is small enough to run cheaply, but the decision problem is real.
 
 In production agent systems, the most expensive mistake is often not the first failure. It is what the agent does next.
 
-IRCE gives that recovery problem a deterministic, OpenEnv-compatible benchmark that is easy to validate, easy to explain, and hard enough to be interesting.
-
-
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+AI Pipeline Recovery openENV Environment gives that recovery problem a deterministic, OpenEnv-compatible benchmark that is easy to validate, easy to explain, and hard enough to be interesting.

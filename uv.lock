@@ -14,6 +14,35 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "ai-pipeline-recovery-openenv-environment"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "gradio" },
+    { name = "openai" },
+    { name = "openenv-core" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gradio", specifier = ">=6.10.0" },
+    { name = "openai", specifier = ">=1.52.0" },
+    { name = "openenv-core", specifier = ">=0.2.0" },
+    { name = "pydantic", specifier = ">=2.8.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "requests", specifier = ">=2.32.0" },
+    { name = "typing-extensions", specifier = ">=4.12.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
+]
+
+[[package]]
 name = "aiofile"
 version = "3.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -873,35 +902,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
-]
-
-[[package]]
-name = "irce"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "gradio" },
-    { name = "openai" },
-    { name = "openenv-core" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "gradio", specifier = ">=6.10.0" },
-    { name = "openai", specifier = ">=1.52.0" },
-    { name = "openenv-core", specifier = ">=0.2.0" },
-    { name = "pydantic", specifier = ">=2.8.0" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "requests", specifier = ">=2.32.0" },
-    { name = "typing-extensions", specifier = ">=4.12.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
 
 [[package]]

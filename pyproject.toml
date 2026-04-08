@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "irce"
+name = "ai-pipeline-recovery-openenv-environment"
 version = "0.1.0"
-description = "Intelligent RecoveryControl Environment scaffold built on OpenEnv"
+description = "AI Pipeline Recovery openENV Environment scaffold built on OpenEnv"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,8 +21,8 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "irce.server.main:main"
-irce-server = "irce.server.main:main"
+server = "ai_pipeline_recovery.server.main:main"
+ai-pipeline-server = "ai_pipeline_recovery.server.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

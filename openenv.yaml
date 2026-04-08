@@ -1,7 +1,7 @@
-name: irce
+name: ai-pipeline-recovery-openenv-environment
 version: "0.1.0"
 description: >
-  IRCE (Intelligent RecoveryControl Environment) is a deterministic OpenEnv
+  AI Pipeline Recovery openENV Environment is a deterministic OpenEnv
   benchmark for budget-aware recovery decisions under ambiguous tool failures,
   rate-limit cooldowns, and reliability drift. Agents learn when to retry,
   modify, switch tools, replan, or escalate.
@@ -32,9 +32,9 @@ tasks:
       costly backup routing. Budget 0.6, 25% noise, drift enabled after step 2.
 
 metadata:
-  display_name: "Intelligent RecoveryControl Environment"
-  package_name: "irce"
-  package_dir: "src/irce"
+  display_name: "AI Pipeline Recovery openENV Environment"
+  package_name: "ai_pipeline_recovery"
+  package_dir: "src/ai_pipeline_recovery"
   benchmark_focus: "failure-recovery under uncertainty"
   deterministic: true
   llm_ready: true

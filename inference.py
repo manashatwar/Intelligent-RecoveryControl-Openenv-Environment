@@ -8,10 +8,10 @@ from typing import Optional, List
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from irce.environment import IRCEEnv
-from irce.models import IRCEAction, IRCEObservation
-from irce.tasks import build_task_registry
-from irce.grading import grade_episode
+from ai_pipeline_recovery.environment import IRCEEnv
+from ai_pipeline_recovery.models import IRCEAction, IRCEObservation
+from ai_pipeline_recovery.tasks import build_task_registry
+from ai_pipeline_recovery.grading import grade_episode
 
 load_dotenv()
 
@@ -29,7 +29,7 @@ if not API_BASE_URL or not MODEL_NAME or not API_KEY:
 
 SUPPORTED_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
 
-SYSTEM_PROMPT = """You are an AI workflow recovery agent for the IRCE benchmark.
+SYSTEM_PROMPT = """You are an AI workflow recovery agent for the AI Pipeline Recovery openENV Environment benchmark.
 
 Given an observation, output EXACTLY one action word: RETRY, MODIFY, SWITCH, REPLAN, or ESCALATE.
 
@@ -148,7 +148,7 @@ def run_task(task_id: int, seed: int, client: OpenAI) -> None:
     rewards: List[float] = []
     steps = 0
 
-    log_start(task=task_name, env="IRCE", model=MODEL_NAME)
+    log_start(task=task_name, env="openENV", model=MODEL_NAME)
 
     obs = env.reset(seed=seed, task_id=task_id)
 
@@ -178,11 +178,11 @@ def run_task(task_id: int, seed: int, client: OpenAI) -> None:
 
 # ===== ENTRY POINT =====
 def main() -> None:
-    parser = argparse.ArgumentParser(description="IRCE inference runner")
-    parser.add_argument("--seed", type=int, default=None)
+    parser = argparse.ArgumentParser(description="AI Pipeline Recovery inference runner")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    seed = args.seed if args.seed is not None else random.randint(1, 10_000_000)
+    seed = args.seed
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 

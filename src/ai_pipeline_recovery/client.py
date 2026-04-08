@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover
     from openenv_core.client_types import StepResult
 
 try:
-    from irce.models import IRCEAction, IRCEObservation, IRCEState
+    from ai_pipeline_recovery.models import IRCEAction, IRCEObservation, IRCEState
 except ImportError:  # pragma: no cover
     from models import IRCEAction, IRCEObservation, IRCEState
 
