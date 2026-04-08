@@ -6,7 +6,7 @@ description: >
   rate-limit cooldowns, and reliability drift. Agents learn when to retry,
   modify, switch tools, replan, or escalate.
 
-app: ai_pipeline_recovery.server.app:app
+app: server.app:app
 runtime: fastapi
 port: 7860
 inference: inference.py

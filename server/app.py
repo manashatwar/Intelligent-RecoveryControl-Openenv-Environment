@@ -53,7 +53,19 @@ except ImportError:
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 
-app = FastAPI(title="IRCE – Intelligent Recovery Control Environment")
+def _create_env():
+    return IRCEEnv()
+
+try:
+    from openenv.core.env_server import create_fastapi_app
+    app = create_fastapi_app(_create_env, IRCEAction, IRCEObservation)
+except ImportError:
+    try:
+        from openenv_core.env_server import create_fastapi_app
+        app = create_fastapi_app(_create_env, IRCEAction, IRCEObservation)
+    except ImportError:
+        app = FastAPI(title="IRCE – Intelligent Recovery Control Environment")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
