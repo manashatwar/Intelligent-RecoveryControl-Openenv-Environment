@@ -20,13 +20,6 @@ API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
 
-if not API_BASE_URL or not MODEL_NAME or not API_KEY:
-    print(
-        "[FATAL] Missing required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN/OPENAI_API_KEY",
-        flush=True,
-    )
-    sys.exit(1)
-
 SUPPORTED_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
 
 SYSTEM_PROMPT = """You are an AI workflow recovery agent for the AI Pipeline Recovery openENV Environment benchmark.
@@ -187,16 +180,31 @@ def run_task(task_id: int, seed: int, client: OpenAI) -> None:
 
 # ===== ENTRY POINT =====
 def main() -> None:
-    parser = argparse.ArgumentParser(description="AI Pipeline Recovery inference runner")
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(description="AI Pipeline Recovery inference runner")
+        parser.add_argument("--seed", type=int, default=42)
+        args = parser.parse_args()
 
-    seed = args.seed
+        seed = args.seed
 
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        # Validate env vars here so a missing var doesn't crash at module level
+        if not API_BASE_URL or not MODEL_NAME or not API_KEY:
+            print(
+                "[FATAL] Missing required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN/OPENAI_API_KEY",
+                flush=True,
+            )
+            sys.exit(1)
 
-    for task_id in sorted(build_task_registry()):
-        run_task(task_id, seed, client)
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+        for task_id in sorted(build_task_registry()):
+            run_task(task_id, seed, client)
+
+    except SystemExit:
+        raise  # allow sys.exit() to propagate normally
+    except Exception as e:
+        print(f"[FATAL] Unexpected error in main: {e}", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
