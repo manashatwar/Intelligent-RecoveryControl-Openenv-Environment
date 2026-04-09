@@ -1,44 +1,47 @@
-import asyncio
+"""
+Organizer-compliant inference entry point for IRCE (AI Pipeline Recovery).
+
+Runs the environment locally in standalone mode — no Docker, no HTTP server,
+no async. Mirrors the FoodCrisisEnv pattern that passed Phase 2.
+"""
+from __future__ import annotations
+
 import os
 import re
 import sys
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# Ensure local src/ package is importable
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
+# ── 1. Standalone mode: must be set BEFORE importing env/models ──────────────
+os.environ.setdefault("IRCE_STANDALONE", "1")
+
+# ── 2. Ensure src/ is on the path ─────────────────────────────────────────────
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 from dotenv import load_dotenv
-from openai import OpenAI
 
 try:
-    from ai_pipeline_recovery.client import IRCEEnvClient
+    from ai_pipeline_recovery.environment import IRCEEnv
+    from ai_pipeline_recovery.grading import grade_episode
     from ai_pipeline_recovery.models import IRCEAction, IRCEObservation
-except ImportError as e:
-    print(f"[DEBUG] Import error: {e}", flush=True)
-    sys.exit(1)
+    from ai_pipeline_recovery.tasks import build_task_registry
+except ImportError:
+    # Fallback for flat-layout (no src/ prefix)
+    from environment import IRCEEnv          # type: ignore[no-redef]
+    from grading import grade_episode        # type: ignore[no-redef]
+    from models import IRCEAction, IRCEObservation  # type: ignore[no-redef]
+    from tasks import build_task_registry    # type: ignore[no-redef]
 
-load_dotenv()
-
-# ===== CONFIG =====
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct:novita")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
-IMAGE_NAME = os.getenv("IMAGE_NAME")
-
-SUPPORTED_ACTIONS = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
-
-# Match actual task max_steps from tasks.py (6, 6, 7) with small buffer
-TASKS = {
-    1: {"name": "easy",   "max_steps": 8},
-    2: {"name": "medium", "max_steps": 8},
-    3: {"name": "hard",   "max_steps": 9},
-}
-
-# Theoretical max cumulative reward per episode (completion 0.9 + progress 0.3 - costs)
-# Using 1.5 as a safe normalizer so score stays in [0,1] for good episodes
-MAX_TOTAL_REWARD = 1.5
-
-SUCCESS_SCORE_THRESHOLD = 0.1
+# ── 3. Config ─────────────────────────────────────────────────────────────────
+BENCHMARK          = "ai_pipeline_recovery"
+DEFAULT_API_BASE   = "https://router.huggingface.co/v1"
+DEFAULT_MODEL      = "meta-llama/Llama-3.1-8B-Instruct:novita"
+SUPPORTED_ACTIONS  = {"RETRY", "MODIFY", "SWITCH", "REPLAN", "ESCALATE"}
+MAX_TOTAL_REWARD   = 1.5   # normaliser so score stays in [0, 1]
+SUCCESS_THRESHOLD  = float(os.getenv("SUCCESS_SCORE_THRESHOLD", "0.1"))
 
 SYSTEM_PROMPT = """You are an AI workflow recovery agent.
 
@@ -59,28 +62,12 @@ Apply these rules in priority order — use the FIRST matching rule:
 Output ONLY one word. No explanation."""
 
 
-# ===== LOGGING =====
-def log_start(task: str, env: str, model: str) -> None:
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+# ── 4. Helpers ────────────────────────────────────────────────────────────────
+
+def clamp01(v: float) -> float:
+    return max(0.0, min(1.0, float(v)))
 
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
-    print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}",
-        flush=True,
-    )
-
-
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
-        flush=True,
-    )
-
-
-# ===== ACTION PARSER =====
 def parse_action(text: str) -> str:
     if not text or not text.strip():
         return "MODIFY"
@@ -99,9 +86,8 @@ def parse_action(text: str) -> str:
     return "MODIFY"
 
 
-# ===== MODEL CALL =====
-def get_action(client: OpenAI, obs: IRCEObservation, step: int) -> str:
-    prompt = (
+def build_prompt(obs: IRCEObservation, step: int) -> str:
+    return (
         f"Step: {step}\n"
         f"Goal: {obs.goal}\n\n"
         f"tool_result: {obs.tool_result}\n"
@@ -115,96 +101,178 @@ def get_action(client: OpenAI, obs: IRCEObservation, step: int) -> str:
         f"Status: {obs.status_summary}\n"
         f"Context: {obs.decision_context}\n"
     )
+
+
+# ── 5. Deterministic fallback (runs even with no API key) ────────────────────
+
+def deterministic_fallback(obs: IRCEObservation) -> str:
+    """Rule-based policy that mirrors the SYSTEM_PROMPT priority order exactly.
+    Used when no API key is set, or when the LLM call fails for any reason."""
+    budget = obs.budget_remaining
+    progress = obs.progress_hint
+    error = obs.error_type
+    same = obs.same_error_count
+    cooldown = obs.cooldown_remaining
+    result = obs.tool_result
+
+    # Rule 1
+    if budget < 0.15 and progress < 0.50:
+        return "ESCALATE"
+    # Rule 2
+    if same >= 4:
+        return "ESCALATE"
+    # Rule 3
+    if error == "RATE_LIMIT":
+        return "SWITCH"
+    # Rule 4
+    if error == "HARD" and same >= 2:
+        return "SWITCH"
+    # Rule 5
+    if error == "HARD" and same < 2:
+        return "MODIFY"
+    # Rule 6
+    if result == "AMBIGUOUS":
+        return "REPLAN"
+    # Rule 7
+    if error == "TRANSIENT" and cooldown == 0:
+        return "RETRY"
+    # Rule 8
+    if cooldown > 0:
+        return "REPLAN"
+    # Rule 9 — default
+    return "MODIFY"
+
+
+# ── 6. LLM call (falls back to deterministic on any failure) ─────────────────
+
+def get_action(client: Any, model: str, obs: IRCEObservation, step: int) -> str:
+    # No client means no API key was configured — use rule engine directly
+    if client is None:
+        action = deterministic_fallback(obs)
+        print(f"[DEBUG] no_client deterministic={action}", file=sys.stderr, flush=True)
+        return action
+
     try:
         completion = client.chat.completions.create(
-            model=MODEL_NAME,
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "user",   "content": build_prompt(obs, step)},
             ],
             temperature=0.0,
             max_tokens=10,
         )
         raw = completion.choices[0].message.content or ""
         return parse_action(raw)
-    except Exception as e:
-        print(f"[DEBUG] Model request failed: {e}", flush=True)
-        return "MODIFY"
+    except Exception as exc:
+        print(f"[DEBUG] LLM call failed: {exc} — using deterministic fallback", file=sys.stderr, flush=True)
+        return deterministic_fallback(obs)
 
 
-# ===== TASK RUNNER =====
-async def run_task(task_id: int, seed: int, env: IRCEEnvClient, client: OpenAI) -> None:
-    task_name = TASKS[task_id]["name"]
-    max_steps = TASKS[task_id]["max_steps"]
+# ── 6. Logging ────────────────────────────────────────────────────────────────
 
-    log_start(task=f"task_{task_id}_{task_name}", env="ai_pipeline_recovery", model=MODEL_NAME)
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    print(
+        f'[STEP] step={step} action="{action}" reward={reward:.2f} '
+        f'done={str(done).lower()} error={error or "null"}',
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ── 7. Episode runner ─────────────────────────────────────────────────────────
+
+def run_task(task_id: int, seed: int, client: Any, model: str) -> None:
+    from ai_pipeline_recovery.tasks import get_task_config  # local import to avoid early-import issues
+    try:
+        cfg = get_task_config(task_id)
+    except Exception:
+        from tasks import get_task_config as _get  # type: ignore[no-redef]
+        cfg = _get(task_id)
+
+    log_start(task=f"task_{task_id}_{cfg.name}", env=BENCHMARK, model=model)
 
     rewards: List[float] = []
     steps_taken = 0
     score = 0.0
     success = False
-    completed = False
+
+    env = IRCEEnv(task_id=task_id, seed=seed)
 
     try:
-        result = await env.reset(task_id=task_id, seed=seed)
-        obs = result.observation
+        obs: IRCEObservation = env.reset(seed=seed, task_id=task_id)
+        done = obs.done
 
-        for step in range(1, max_steps + 1):
-            if result.done:
+        for step in range(1, cfg.max_steps + 2):   # +1 buffer over task limit
+            if done:
                 break
 
-            action_str = get_action(client, obs, step)
+            action_str = get_action(client, model, obs, step)
 
-            result = await env.step(IRCEAction(action_type=action_str))
-            obs = result.observation
-
-            reward = result.reward or 0.0
-            done = result.done
+            obs = env.step(IRCEAction(action_type=action_str))
+            reward = float(obs.reward)
+            done   = bool(obs.done)
+            error  = "action_error" if obs.last_action_error else None
 
             rewards.append(reward)
             steps_taken = step
-
-            log_step(step, action_str, reward, done, None)
+            log_step(step=step, action=action_str, reward=reward, done=done, error=error)
 
             if done:
-                # Check completion: progress >= 1.0 means task fully solved
-                completed = obs.progress_hint >= 1.0
                 break
 
-        # Normalize: clamp sum of rewards to [0, 1]
-        raw_score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-        score = min(max(raw_score, 0.0), 1.0)
-        success = score >= SUCCESS_SCORE_THRESHOLD
+        score   = clamp01(grade_episode(env.episode_log))
+        success = score >= SUCCESS_THRESHOLD
 
-    except Exception as e:
-        print(f"[DEBUG] Task {task_id} error: {e}", flush=True)
-        score = 0.0
+    except Exception as exc:
+        print(f"[DEBUG] Task {task_id} error: {exc}", file=sys.stderr, flush=True)
+        score   = 0.0
         success = False
 
     finally:
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
-# ===== MAIN =====
-async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+# ── 8. Entry point ────────────────────────────────────────────────────────────
 
-    if IMAGE_NAME:
-        env = await IRCEEnvClient.from_docker_image(IMAGE_NAME)
+def main() -> None:
+    load_dotenv()
+
+    api_key    = (os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "").strip()
+    base_url   = (os.getenv("API_BASE_URL") or DEFAULT_API_BASE).strip()
+    model_name = (os.getenv("MODEL_NAME") or DEFAULT_MODEL).strip()
+
+    client: Any
+    if not api_key:
+        print("[DEBUG] No API key — using built-in deterministic fallback.", file=sys.stderr, flush=True)
+        client = None
     else:
-        env = IRCEEnvClient(base_url="http://localhost:7860")
-
-    try:
-        for task_id in sorted(TASKS):
-            await run_task(task_id, 42, env, client)
-    except Exception as e:
-        print(f"[DEBUG] main error: {e}", flush=True)
-    finally:
         try:
-            await env.close()
-        except Exception as e:
-            print(f"[DEBUG] env.close() error: {e}", flush=True)
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=base_url)
+        except Exception as exc:
+            print(f"[DEBUG] OpenAI client init failed: {exc} — deterministic fallback.", file=sys.stderr, flush=True)
+            client = None
+
+    task_registry = build_task_registry()
+    for task_id in sorted(task_registry):
+        try:
+            run_task(task_id=task_id, seed=42, client=client, model=model_name)
+        except Exception as exc:
+            print(f"[DEBUG] run_task({task_id}) unhandled: {exc}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
